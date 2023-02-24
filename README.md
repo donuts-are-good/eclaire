@@ -6,6 +6,10 @@
 
 Eclaire is a lightning-fast static site webserver with automatic HTTPS written in Go. It is dead simple to use, fully portable, and automatically sets up HTTPS for your static sites in seconds. 
 
+## eclaire <3's bearclaw
+
+eclaire is 100% compatible and made to be used with [bearclaw](https://github.com/donuts-are-good/bearclaw) sites. bearclaw is a tiny static site generator with rss, [check it out!](https://github.com/donuts-are-good/bearclaw) 
+
 ## why not nginx/apache?
 
 NGINX and Apache are great, but they're general purpose webservers that are designed to handle a lot more responsibilities than just serving static content, and you still end up having to set up HTTPS after. 
