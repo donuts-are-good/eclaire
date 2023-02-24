@@ -1,7 +1,9 @@
 package main
 
 import (
-	"fmt"
+	"encoding/hex"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,10 +11,239 @@ import (
 	"time"
 
 	"golang.org/x/crypto/acme/autocert"
+	"golang.org/x/crypto/blake2b"
 )
 
-// getDomainFromHost takes a hostname string in the form "domain.com:port" and returns just the domain name.
-func getDomainFromHost(host string) string {
+// init - we're mainly just setting up directory and file
+// boilerplate items here that should run before main()
+func init() {
+
+	// initialize the server
+	err := setupServer()
+	if err != nil {
+		log.Println("Error setting up server:", err)
+		return
+	}
+
+}
+
+// setupServer scans for and/or creates necessary boilerplate directories and the files that go in them.
+// if www doesnt exist, it will be created along with the index and 404.html
+// if www does exist, but those files are missing, it assumes you wanted it
+// that way and leaves them alone.
+func setupServer() error {
+
+	// ./www is where all of the content you're hosting lives.
+	// inside www is where you put folders matching the names of your domains.
+
+	/*
+
+		sidenote, conjecture, errata...
+		why apache and nginx dont work like this, the world may never know,
+		but this format always made the most sense.
+		miss me with that symlinked config stuff.
+
+		if there is no www folder, the user won't know to put anything there, so we should create it if it doesn't exist.
+
+	*/
+
+	// check for the www folder
+	_, err := os.Stat("./www")
+	if os.IsNotExist(err) {
+
+		// do the actual making of the folder
+		err := os.Mkdir("./www", 0755)
+		if err != nil {
+			return err
+		}
+
+		// nginx and apache always had a sweet it works page
+		// that would tell attackers all the sweet details about
+		// all the fun bits your server has hot and ready for them.
+		// we should do like the cool kids do.
+		html := []byte("<html><body><h1>Eclaire is working!</h1></body></html>")
+		err = os.WriteFile("./www/index.html", html, 0644)
+		if err != nil {
+			return err
+		}
+		// custom 404's were pretty hot back in the 88x31 days,
+		// and for whatever reason the time just was never available
+		// to set them up always, so let's put this here but more as
+		// an indicator, rather than a prompt to be artistic.
+		// but that'd be cool.
+		html404 := []byte("<html><body><h1>404</h1><h4>call the cops</h4></body></html>")
+
+		// write the file, we dont use ioutil anymore for writing
+		// in modern Go stuff because it's deprecated, so here we're
+		// basically doing the same thing with os instead of io.
+		err = os.WriteFile("./www/404.html", html404, 0644)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// main is where all of the magic happens.
+func main() {
+
+	// new muxer
+	mux := http.NewServeMux()
+
+	// send requests to the handler
+	mux.HandleFunc("/", domainHandler)
+
+	// a cached request object
+	type cachedItem struct {
+		resp    *http.Response
+		content []byte
+	}
+
+	// a poor man's makeshift cache
+	cache := make(map[string]*cachedItem)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		// for each request, we hash the path
+		pathHash := hashPath(r.URL.Path)
+
+		// for each entry in the cache, we do some validation
+		cacheEntry, ok := cache[pathHash]
+
+		if ok {
+
+			// in our cachedItem, we're essentially looking at a http.Response
+			// pointer with some extra stuff attached to it.
+			// that response has header data, and in that header data, we're
+			// storing last-modified as a string which can be parsed into time.
+			// this was mainly done as an assumption it'd be less intensive than
+			// calculating the hash then calculating modtime on the file itself
+			// on disk for each request if a lookup will suffice.
+			lastModifiedStr := cacheEntry.resp.Header.Get("Last-Modified")
+			lastModifiedTime, err := time.Parse(http.TimeFormat, lastModifiedStr)
+			if err != nil {
+				log.Println("error checking modtime: ", err)
+			}
+
+			// here we are checking if the cache needs to be invalidated
+			if file, err := os.Open(filepath.Join("www", r.URL.Path)); err == nil {
+				defer file.Close()
+
+				// stat is used to get modTime, which we compare to
+				// After(lastModifiedTime)
+				stat, err := file.Stat()
+				if err == nil && stat.ModTime().After(lastModifiedTime) {
+
+					// always knew there was a delete keyword but hadn't had a
+					// whole lot of chances to use it where it made sense...
+					// today is your day, my friend.
+					delete(cache, pathHash)
+
+				}
+			}
+		}
+
+		// get the file that was asked for and server it to the user
+		// unless there's a problem.
+		transport := http.DefaultTransport
+		client := &http.Client{Transport: transport}
+		resp, err := client.Do(r)
+		if err != nil {
+			http.Error(w, "500 internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// dont forget to shut the fridge.
+		defer resp.Body.Close()
+
+		// use io readall for the response body
+		content, err := io.ReadAll(resp.Body)
+		if err != nil {
+			http.Error(w, "500 internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// set headers
+		cacheEntry = &cachedItem{resp: resp, content: content}
+		cacheEntry.resp.Header.Set("Cache-Control", "public, max-age=86400")
+		cacheEntry.resp.Header.Set("Vary", "Accept-Encoding")
+		cacheEntry.resp.Header.Set("Content-Encoding", "gzip")
+		cacheEntry.resp.Header.Set("Last-Modified", time.Now().Format(http.TimeFormat))
+
+		// at to our 'cache'
+		cache[pathHash] = cacheEntry
+
+		// range the header for the kv data
+		for headerKey, headerKeyValue := range resp.Header {
+			w.Header().Set(headerKey, headerKeyValue[0])
+		}
+
+		// write the header response code
+		w.WriteHeader(resp.StatusCode)
+
+		// send it, brah
+		w.Write(content)
+
+	})
+
+	// certManager is for autocert letsencrypt
+	certManager := autocert.Manager{
+		Prompt: autocert.AcceptTOS,
+		Cache:  autocert.DirCache("certs"),
+	}
+
+	// https server params
+	// maybe these need to be tuned. not sure until we run the test
+	// https://github.com/donuts-are-good/knockknock
+	server := &http.Server{
+		Addr:         ":https",
+		Handler:      handler,
+		TLSConfig:    certManager.TLSConfig(),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	// http(80) https(443)
+	go func() {
+
+		// http port server
+		log.Println("Starting HTTP server on port 80...")
+		err := http.ListenAndServe(":http", certManager.HTTPHandler(nil))
+		if err != nil {
+			log.Println("Error starting HTTP server:", err)
+		}
+	}()
+
+	// https port server
+	log.Println("Starting HTTPS server on port 443...")
+	err := server.ListenAndServeTLS("", "")
+	if err != nil {
+		log.Println("Error starting HTTPS server:", err)
+	}
+}
+
+// hashPath is part of the caching strategy
+// blake2b was used just because it's fast
+// and reasonably strong for a static site
+// and it is present in the Go stdlib
+func hashPath(path string) string {
+
+	// make a new hash object
+	h, _ := blake2b.New256(nil)
+
+	// add the path to the hash object
+	h.Write([]byte(path))
+
+	// hash it
+	hash := h.Sum(nil)
+
+	// return the hash as hex
+	return hex.EncodeToString(hash)
+
+}
+
+// splitDomainFromPort takes a hostname string in the form "domain.com:port" and returns just the domain name.
+func splitDomainFromPort(host string) string {
 
 	// split the hostname from the port by chopping at :
 	parts := strings.Split(host, ":")
@@ -26,7 +257,7 @@ func getDomainFromHost(host string) string {
 func domainHandler(w http.ResponseWriter, r *http.Request) {
 
 	// get the domain being requested
-	domain := getDomainFromHost(r.Host)
+	domain := splitDomainFromPort(r.Host)
 
 	// check if we have a directory for it
 	path := filepath.Join("./www", domain)
@@ -109,79 +340,4 @@ func domainHandler(w http.ResponseWriter, r *http.Request) {
 	// let it rip
 	http.FileServer(http.Dir(path)).ServeHTTP(w, r)
 
-}
-
-func setupServer() error {
-	// Create the www directory if it doesn't exist
-	_, err := os.Stat("./www")
-	if os.IsNotExist(err) {
-		err := os.Mkdir("./www", 0755)
-		if err != nil {
-			return err
-		}
-		// Create a simple demo HTML page for Eclaire
-		html := []byte("<html><body><h1>Eclaire is working!</h1></body></html>")
-		err = os.WriteFile("./www/index.html", html, 0644)
-		if err != nil {
-			return err
-		}
-		// Create a custom HTML page for Eclaire
-		html404 := []byte("<html><body><h1>404</h1><h4>call the cops</h4></body></html>")
-		err = os.WriteFile("./www/404.html", html404, 0644)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func init() {
-
-	// initialize the server
-	err := setupServer()
-	if err != nil {
-		fmt.Println("Error setting up server:", err)
-		return
-	}
-
-}
-
-func main() {
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", domainHandler)
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Header().Set("Vary", "Accept-Encoding")
-		w.Header().Set("Content-Encoding", "gzip")
-		http.DefaultServeMux.ServeHTTP(w, r)
-	})
-
-	certManager := autocert.Manager{
-		Prompt: autocert.AcceptTOS,
-		Cache:  autocert.DirCache("certs"),
-	}
-
-	server := &http.Server{
-		Addr:         ":https",
-		Handler:      handler,
-		TLSConfig:    certManager.TLSConfig(),
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-	}
-
-	go func() {
-		fmt.Println("Starting HTTP server on port 80...")
-		err := http.ListenAndServe(":http", certManager.HTTPHandler(nil))
-		if err != nil {
-			fmt.Println("Error starting HTTP server:", err)
-		}
-	}()
-
-	fmt.Println("Starting HTTPS server on port 443...")
-	err := server.ListenAndServeTLS("", "")
-	if err != nil {
-		fmt.Println("Error starting HTTPS server:", err)
-	}
 }
