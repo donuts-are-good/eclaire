@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -253,8 +254,16 @@ func splitDomainFromPort(host string) string {
 
 }
 
+// logRequest logs the specified request to the console
+func logRequest(r *http.Request) {
+	fmt.Printf("[%s] %s %s\n", time.Now().Format("2006-01-02 15:04:05"), r.Method, r.URL.Path)
+}
+
 // domainHandler checks what domain is being requested, and routes the request appropriately
 func domainHandler(w http.ResponseWriter, r *http.Request) {
+
+	// log the request
+	logRequest(r)
 
 	// get the domain being requested
 	domain := splitDomainFromPort(r.Host)
