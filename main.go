@@ -105,6 +105,9 @@ func main() {
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
+		// debug: log the request
+		logRequest(r)
+
 		// for each request, we hash the path
 		pathHash := hashPath(r.URL.Path)
 
