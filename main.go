@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -194,9 +193,9 @@ func main() {
 
 	// certManager is for autocert letsencrypt
 	certManager := autocert.Manager{
-		Prompt:     autocert.AcceptTOS,
-		Cache:      autocert.DirCache("certs"),
-		HostPolicy: func(_ context.Context, _ string) error { return nil },
+		Prompt: autocert.AcceptTOS,
+		Cache:  autocert.DirCache("certs"),
+		// HostPolicy: func(_ context.Context, _ string) error { return nil },
 	}
 
 	// https server params
