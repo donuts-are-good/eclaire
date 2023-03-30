@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -151,10 +152,18 @@ func main() {
 		// unless there's a problem.
 		transport := http.DefaultTransport
 		client := &http.Client{Transport: transport}
-		resp, err := client.Do(r)
+		req, err := http.NewRequest(r.Method, "http://"+r.Host+r.URL.Path, r.Body)
 		if err != nil {
-			log.Printf("domainHandler: error during client.Do: %v", err) // Added log
-			http.Error(w, "error transporting another 500 internal server error", http.StatusInternalServerError)
+			log.Printf("domainHandler: error creating new request: %v", err)
+			http.Error(w, "error creating request 500 internal server error", http.StatusInternalServerError)
+			return
+		}
+		req.Header = r.Header
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("domainHandler: error during client.Do: %v", err)
+			http.Error(w, "error transporting 500 internal server error", http.StatusInternalServerError)
 			return
 		}
 
@@ -193,9 +202,9 @@ func main() {
 
 	// certManager is for autocert letsencrypt
 	certManager := autocert.Manager{
-		Prompt: autocert.AcceptTOS,
-		Cache:  autocert.DirCache("certs"),
-		// HostPolicy: func(_ context.Context, _ string) error { return nil },
+		Prompt:     autocert.AcceptTOS,
+		Cache:      autocert.DirCache("certs"),
+		HostPolicy: func(_ context.Context, _ string) error { return nil },
 	}
 
 	// https server params
