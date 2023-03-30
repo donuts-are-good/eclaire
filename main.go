@@ -270,7 +270,10 @@ func splitDomainFromPort(host string) string {
 
 // logRequest logs the specified request to the console
 func logRequest(r *http.Request) {
-	fmt.Printf("[%s] [%s] (%s) %s\n", time.Now().Format("2006-01-02 15:04:05"), r.Host, r.Method, r.URL.Path)
+	// Don't log requests for the 404 pages
+	if r.URL.Path != "/404.html" {
+		fmt.Printf("[%s] [%s] (%s) %s\n", time.Now().Format("2006-01-02 15:04:05"), r.Host, r.Method, r.URL.Path)
+	}
 }
 
 // domainHandler checks what domain is being requested, and routes the request appropriately
