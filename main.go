@@ -151,10 +151,17 @@ func main() {
 		// unless there's a problem.
 		transport := http.DefaultTransport
 		client := &http.Client{Transport: transport}
-		resp, err := client.Do(r)
+		url := fmt.Sprintf("https://localhost/www/%s%s", r.Host, r.URL.Path) // Replace 'localhost' with your server address if needed
+		newReq, err := http.NewRequest(r.Method, url, r.Body)
 		if err != nil {
-			http.Error(w, "500 internal server error", http.StatusInternalServerError)
+			log.Printf("domainHandler: error creating new request: %v", err)
+			http.Error(w, "error creating request, 500 internal server error", http.StatusInternalServerError)
 			return
+		}
+		newReq.Header = r.Header // Copy the headers from the original request
+		resp, err := client.Do(newReq)
+		if err != nil {
+			log.Println("error: ", err)
 		}
 
 		// dont forget to shut the fridge.
@@ -163,7 +170,7 @@ func main() {
 		// use io readall for the response body
 		content, err := io.ReadAll(resp.Body)
 		if err != nil {
-			http.Error(w, "500 internal server error", http.StatusInternalServerError)
+			http.Error(w, "this is bullshit. 500 internal server error", http.StatusInternalServerError)
 			return
 		}
 
@@ -259,13 +266,14 @@ func splitDomainFromPort(host string) string {
 
 // logRequest logs the specified request to the console
 func logRequest(r *http.Request) {
-	fmt.Printf("[%s] %s %s\n", time.Now().Format("2006-01-02 15:04:05"), r.Method, r.URL.Path)
+	fmt.Printf("[%s] [%s] (%s) %s\n", time.Now().Format("2006-01-02 15:04:05"), r.Host, r.Method, r.URL.Path)
 }
 
 // domainHandler checks what domain is being requested, and routes the request appropriately
 func domainHandler(w http.ResponseWriter, r *http.Request) {
 
 	// log the request
+	log.Printf("domainHandler: processing request for %s", r.URL.String())
 	logRequest(r)
 
 	// get the domain being requested
@@ -275,6 +283,7 @@ func domainHandler(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join("./www", domain)
 	_, err := os.Stat(path)
 	if err != nil {
+		log.Printf("domainHandler: error accessing path %s", path)
 		if os.IsNotExist(err) {
 
 			/*
@@ -290,21 +299,23 @@ func domainHandler(w http.ResponseWriter, r *http.Request) {
 			// this is the site-specific custom 404
 			_, err := os.Stat(filepath.Join("./www", domain, "404.html"))
 			if err == nil {
+				log.Printf("domainHandler: serving site-specific 404 for %s", domain)
 				http.ServeFile(w, r, filepath.Join("./www", domain, "404.html"))
 				return
 			}
 			// this is the 404 that comes with the server
 			_, err = os.Stat("./www/404.html")
 			if err == nil {
+				log.Printf("domainHandler: serving default 404 for %s", domain)
 				http.ServeFile(w, r, "./www/404.html")
 				return
 			}
 
 			// this is the value-brand 404 page
+			log.Printf("domainHandler: serving generic 404 for %s", domain)
 			http.Error(w, "404 page not found", http.StatusNotFound)
 			return
 		}
-
 		// if anything goes wrong, just run around screaming
 		// http 500 error
 		// it didn't make sense to make anything elaborate bc
@@ -314,7 +325,8 @@ func domainHandler(w http.ResponseWriter, r *http.Request) {
 
 		// as soon as those words came off the fingertips,
 		// there was regret and a sense of foreshadowing.
-		http.Error(w, "500 internal server error", http.StatusInternalServerError)
+		log.Printf("domainHandler: serving 500 internal server error for %s", domain)
+		http.Error(w, "uh oh 500 internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -322,12 +334,14 @@ func domainHandler(w http.ResponseWriter, r *http.Request) {
 	filePath := filepath.Join(path, r.URL.Path)
 	_, err = os.Stat(filePath)
 	if err != nil {
+		log.Printf("domainHandler: error accessing filePath %s", filePath)
 
 		if os.IsNotExist(err) {
 
 			// this is the site-specific custom 404
 			_, err := os.Stat(filepath.Join(path, "404.html"))
 			if err == nil {
+				log.Printf("domainHandler: serving site-specific 404 for %s", domain)
 				http.ServeFile(w, r, filepath.Join(path, "404.html"))
 				return
 			}
@@ -335,6 +349,7 @@ func domainHandler(w http.ResponseWriter, r *http.Request) {
 			// serve the default 404 page if it exists
 			_, err = os.Stat("./www/404.html")
 			if err == nil {
+				log.Printf("domainHandler: serving default 404 for %s", domain)
 				http.ServeFile(w, r, "./www/404.html")
 				return
 			}
@@ -345,11 +360,12 @@ func domainHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		//
-		http.Error(w, "500 internal server error", http.StatusInternalServerError)
+		http.Error(w, "call the cops! 500 internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	// let it rip
-	http.FileServer(http.Dir(path)).ServeHTTP(w, r)
+	log.Printf("domainHandler: serving generic 404 for %s", domain)
+	http.ServeFile(w, r, filePath)
 
 }
