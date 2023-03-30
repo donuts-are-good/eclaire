@@ -151,17 +151,11 @@ func main() {
 		// unless there's a problem.
 		transport := http.DefaultTransport
 		client := &http.Client{Transport: transport}
-		url := fmt.Sprintf("https://localhost/www/%s%s", r.Host, r.URL.Path) // Replace 'localhost' with your server address if needed
-		newReq, err := http.NewRequest(r.Method, url, r.Body)
+		resp, err := client.Do(r)
 		if err != nil {
-			log.Printf("domainHandler: error creating new request: %v", err)
-			http.Error(w, "error creating request, 500 internal server error", http.StatusInternalServerError)
+			log.Printf("domainHandler: error during client.Do: %v", err) // Added log
+			http.Error(w, "error transporting another 500 internal server error", http.StatusInternalServerError)
 			return
-		}
-		newReq.Header = r.Header // Copy the headers from the original request
-		resp, err := client.Do(newReq)
-		if err != nil {
-			log.Println("error: ", err)
 		}
 
 		// dont forget to shut the fridge.
