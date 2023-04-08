@@ -50,11 +50,15 @@ func setupServer() error {
 	*/
 
 	// check for the www folder
-	_, err := os.Stat("./www")
-	if os.IsNotExist(err) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	if _, err = os.Stat(filepath.Join(wd, "www")); os.IsNotExist(err) {
 
 		// do the actual making of the folder
-		err := os.Mkdir("./www", 0755)
+		err := os.Mkdir(filepath.Join(wd, "www"), 0755)
 		if err != nil {
 			return err
 		}
@@ -64,7 +68,7 @@ func setupServer() error {
 		// all the fun bits your server has hot and ready for them.
 		// we should do like the cool kids do.
 		html := []byte("<html><body><h1>Eclaire is working!</h1></body></html>")
-		err = os.WriteFile("./www/index.html", html, 0644)
+		err = os.WriteFile(filepath.Join(wd, "www", "index.html"), html, 0644)
 		if err != nil {
 			return err
 		}
@@ -78,7 +82,7 @@ func setupServer() error {
 		// write the file, we dont use ioutil anymore for writing
 		// in modern Go stuff because it's deprecated, so here we're
 		// basically doing the same thing with os instead of io.
-		err = os.WriteFile("./www/404.html", html404, 0644)
+		err = os.WriteFile(filepath.Join(wd, "www", "404.html"), html404, 0644)
 		if err != nil {
 			return err
 		}
@@ -286,9 +290,14 @@ func domainHandler(w http.ResponseWriter, r *http.Request) {
 	// get the domain being requested
 	domain := splitDomainFromPort(r.Host)
 
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("could not get working directory: %v", err)
+	}
+
 	// check if we have a directory for it
-	path := filepath.Join("./www", domain)
-	_, err := os.Stat(path)
+	path := filepath.Join(wd, "www", domain)
+	_, err = os.Stat(path)
 	if err != nil {
 		log.Printf("domainHandler: error accessing path %s", path)
 		if os.IsNotExist(err) {
@@ -304,17 +313,17 @@ func domainHandler(w http.ResponseWriter, r *http.Request) {
 			*/
 
 			// this is the site-specific custom 404
-			_, err := os.Stat(filepath.Join("./www", domain, "404.html"))
+			_, err := os.Stat(filepath.Join(wd, "www", domain, "404.html"))
 			if err == nil {
 				log.Printf("domainHandler: serving site-specific 404 for %s", domain)
-				http.ServeFile(w, r, filepath.Join("./www", domain, "404.html"))
+				http.ServeFile(w, r, filepath.Join(wd, "www", domain, "404.html"))
 				return
 			}
 			// this is the 404 that comes with the server
-			_, err = os.Stat("./www/404.html")
+			_, err = os.Stat(filepath.Join(wd, "www", "404.html"))
 			if err == nil {
 				log.Printf("domainHandler: serving default 404 for %s", domain)
-				http.ServeFile(w, r, "./www/404.html")
+				http.ServeFile(w, r, filepath.Join(wd, "www", "404.html"))
 				return
 			}
 
@@ -354,10 +363,10 @@ func domainHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// serve the default 404 page if it exists
-			_, err = os.Stat("./www/404.html")
+			_, err = os.Stat(filepath.Join(wd, "www", "404.html"))
 			if err == nil {
 				log.Printf("domainHandler: serving default 404 for %s", domain)
-				http.ServeFile(w, r, "./www/404.html")
+				http.ServeFile(w, r, filepath.Join(wd, "www", "404.html"))
 				return
 			}
 
